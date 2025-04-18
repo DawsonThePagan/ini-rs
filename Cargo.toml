@@ -2,5 +2,10 @@
 name = "ini-rs"
 version = "0.1.5"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/DawsonThePagan/ini-rs"
+readme = "readme.md"
+keywords = ["config", "file"]
+categories = ["config", "filesystem"]
 
 [dependencies]
