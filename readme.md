@@ -4,4 +4,4 @@ A rust crate to read an INI file into a structure. The data can be accessed dire
 
 Testing application can be found [here](https://github.com/DawsonThePagan/Test-ini-rs)
 
-Crate.io entry [here]()
+Crate.io entry [here](https://crates.io/crates/ini-rs)
