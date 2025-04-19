@@ -71,6 +71,12 @@ This does not save the file.
 Remove a section, will remove all keys from the section. Will not error if it doesn't exist.
 This does not save the file.
 
-### Save() -> Result<usize, io::Error>
-Saves the changes to the file. Will not keep any comments present in the file.
+### save() -> Result<usize, io::Error>
+Save the changes to the file. Will not keep any comments present in the file.
 Ok(usize) contains the new size of the file.
+
+### from_string(str: String) -> Result<Ini, io::Error>
+Make an INI structure from a string. Does not set the config_file so cannot save unless set manually.
+
+### to_string() -> Result<String, io::Error>
+Dump out the contents of the structure in the INI format to a string.

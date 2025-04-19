@@ -170,7 +170,7 @@ impl Ini {
     /// All comments in the INI file will be lost by doing this.
     pub fn save(&self) -> Result<usize, io::Error> {
         if self.config_file.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::Other, "No config file was found"))
+            return Err(io::Error::new(io::ErrorKind::Other, "config_file is not set. This is likely because this was created using from_string()"))
         }
 
         let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&self.config_file)?;
