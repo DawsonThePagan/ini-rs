@@ -1,6 +1,6 @@
 [package]
 name = "ini-rs"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/DawsonThePagan/ini-rs"
@@ -10,3 +10,4 @@ categories = ["config", "filesystem"]
 description = "Read and write INI files with funcions. Also allows direct access to INI data"
 
 [dependencies]
+read_lines_with_blank = "0.1.0"

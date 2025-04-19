@@ -1,8 +1,10 @@
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, Read, Write};
+use std::fs::{OpenOptions};
+use std::io::{self, Write};
 use std::collections::BTreeMap;
 use std::env::consts::OS;
 use std::path::Path;
+extern crate read_lines_with_blank;
+use read_lines_with_blank::read_lines_with_blank;
 
 /// Load INI files into a structured BTreeMap, then edit them.
 /// Can also create new INI files.
@@ -21,24 +23,6 @@ const CONFIG_COMMENT: &str = "#";
 const NEW_LINE_WINDOWS: &str = "\r\n";
 const NEW_LINE_LINUX: &str = "\n";
 
-fn read_lines_no_stop_on_blank(buf_read: &mut BufReader<File>) -> io::Result<Vec<String>> {
-    let mut ret: Vec<String> = Vec::new();
-    let new_line = match OS {
-        "linux" => NEW_LINE_LINUX,
-        "windows" => NEW_LINE_WINDOWS,
-        _ => return Err(io::Error::new(io::ErrorKind::Unsupported, "Unsupported OS"))
-    };
-
-    let mut data: Vec<u8> = Vec::new();
-    buf_read.read_to_end(&mut data)?;
-    let str: String = String::from_utf8_lossy(&data).to_string();
-
-    for v in str.split(new_line) {
-        ret.push(v.to_string());
-    }
-    Ok(ret)
-}
-
 impl Ini {
     /// Load in an INI file and return its structure.
     /// If the file doesn't exist, then returns empty structure.
@@ -48,14 +32,12 @@ impl Ini {
         if !Path::new(&location).exists() {
             return Ok(ret);
         }
-        let f = File::open(&location)?;
-        let mut reader = BufReader::new(f);
 
         let mut in_section = false;
 
-        let lines = match read_lines_no_stop_on_blank(&mut reader) {
+        let lines = match read_lines_with_blank(&location) {
             Ok(x) => x,
-            Err(e) => return Err(e),
+            Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Failed to read file"))
         };
 
         println!("Number of lines: {}", lines.len());
