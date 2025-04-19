@@ -4,13 +4,13 @@ version = 4
 
 [[package]]
 name = "ini-rs"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "read_lines_with_blank",
 ]
 
 [[package]]
 name = "read_lines_with_blank"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97dd96d16cd9148eaf1f282271c132137487352228080dd97fc6a77f2fea4d25"
+checksum = "0e0acc000a01d8e75b56b048a0ec3c7557dd7c35941a8668b11653bed9edbe1e"
