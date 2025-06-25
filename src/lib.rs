@@ -35,6 +35,7 @@ impl Ini {
         }
 
         let mut in_section = false;
+        let mut cur_sec: String = String::from("");
 
         let lines = match read_lines_with_blank(&location) {
             Ok(x) => x,
@@ -51,8 +52,8 @@ impl Ini {
 
             // Section found
             if line.starts_with(CONFIG_SECTION_START) && line.contains(CONFIG_SECTION_END) {
-                let edit = line.replace(CONFIG_SECTION_START, "").replace(CONFIG_SECTION_END, "").trim().to_string();
-                ret.config_map.insert(edit.clone(), BTreeMap::new());
+                cur_sec = line.replace(CONFIG_SECTION_START, "").replace(CONFIG_SECTION_END, "").trim().to_string();
+                ret.config_map.insert(cur_sec.clone(), BTreeMap::new());
                 in_section = true;
                 continue;
             }
@@ -67,12 +68,7 @@ impl Ini {
                     None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry couldn't be split.")),
                 };
 
-                let mut last = match ret.config_map.last_entry() {
-                    Some(x) => x,
-                    None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry didn't have a section.")),
-                };
-
-                last.get_mut().insert(kvp.0.to_string(), kvp.1.to_string());
+                ret.config_map.get_mut(&cur_sec).unwrap().insert(kvp.0.to_string(), kvp.1.to_string());
 
                 continue;
             }
