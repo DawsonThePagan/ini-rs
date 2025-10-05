@@ -19,7 +19,8 @@ pub struct Ini {
 const CONFIG_SECTION_START: &str = "[";
 const CONFIG_SECTION_END: &str = "]";
 const CONFIG_KVP_SPLIT: &str = "=";
-const CONFIG_COMMENT: &str = "#";
+const CONFIG_COMMENT_HASH: &str = "#";
+const CONFIG_COMMENT_SEMI: &str = ";";
 
 const NEW_LINE_WINDOWS: &str = "\r\n";
 const NEW_LINE_LINUX: &str = "\n";
@@ -33,16 +34,41 @@ impl Ini {
         if !Path::new(&location).exists() {
             return Ok(ret);
         }
-
-        let mut in_section = false;
+        
 
         let lines = match read_lines_with_blank(&location) {
             Ok(x) => x,
             Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Failed to read file"))
         };
 
+        ret = match Self::build_struct(lines) {
+            Ok(x) => x,
+            Err(e) => return Err(e)
+        };
+
+        ret.config_file = location;
+        Ok(ret)
+    }
+
+    /// Create ini structure from a string. Does not set the config_file so save doesn't work unless set manually.
+    pub fn from_string(str: String) -> Result<Ini, io::Error> {
+        let lines = match read_lines_with_blank_from_str(&str) {
+            Ok(x) => x,
+            Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Failed to read file"))
+        };
+
+        Self::build_struct(lines)
+    }
+
+    /// Build the struct given a set of lines
+    /// Will need the file location added
+    fn build_struct(lines: Vec<String>) -> Result<Ini, io::Error> {
+        let mut in_section = false;
+        let mut cur_sec: String = String::from("");
+        let mut ret = Ini{ config_map: BTreeMap::new(), config_file: "".to_string() };
+
         for line in lines {
-            if line.starts_with(CONFIG_COMMENT) {
+            if line.starts_with(CONFIG_COMMENT_HASH) || line.starts_with(CONFIG_COMMENT_SEMI) {
                 continue;
             }
             if line.len() == 0 {
@@ -51,8 +77,8 @@ impl Ini {
 
             // Section found
             if line.starts_with(CONFIG_SECTION_START) && line.contains(CONFIG_SECTION_END) {
-                let edit = line.replace(CONFIG_SECTION_START, "").replace(CONFIG_SECTION_END, "").trim().to_string();
-                ret.config_map.insert(edit.clone(), BTreeMap::new());
+                cur_sec = line.replace(CONFIG_SECTION_START, "").replace(CONFIG_SECTION_END, "").trim().to_string();
+                ret.config_map.insert(cur_sec.clone(), BTreeMap::new());
                 in_section = true;
                 continue;
             }
@@ -67,12 +93,7 @@ impl Ini {
                     None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry couldn't be split.")),
                 };
 
-                let mut last = match ret.config_map.last_entry() {
-                    Some(x) => x,
-                    None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry didn't have a section.")),
-                };
-
-                last.get_mut().insert(kvp.0.to_string(), kvp.1.to_string());
+                ret.config_map.get_mut(&cur_sec).unwrap().insert(kvp.0.to_string(), kvp.1.to_string());
 
                 continue;
             }
@@ -112,58 +133,6 @@ impl Ini {
         Ok(ret)
     }
 
-    /// Create ini structure from a string. Does not set the config_file so save doesn't work unless set manually.
-    pub fn from_string(str: String) -> Result<Ini, io::Error> {
-        let mut in_section = false;
-        let mut ret = Ini{ config_map: BTreeMap::new(), config_file: "".to_string() };
-
-        let lines = match read_lines_with_blank_from_str(&str) {
-            Ok(x) => x,
-            Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Failed to read file"))
-        };
-
-        for line in lines {
-            if line.starts_with(CONFIG_COMMENT) {
-                continue;
-            }
-            if line.len() == 0 {
-                continue;
-            }
-
-            // Section found
-            if line.starts_with(CONFIG_SECTION_START) && line.contains(CONFIG_SECTION_END) {
-                let edit = line.replace(CONFIG_SECTION_START, "").replace(CONFIG_SECTION_END, "").trim().to_string();
-                ret.config_map.insert(edit.clone(), BTreeMap::new());
-                in_section = true;
-                continue;
-            }
-            // KVP found
-            else if line.contains(CONFIG_KVP_SPLIT) {
-                if !in_section {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry found before section."));
-                }
-
-                let kvp = match line.split_once(CONFIG_KVP_SPLIT) {
-                    Some(x) => x,
-                    None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry couldn't be split.")),
-                };
-
-                let mut last = match ret.config_map.last_entry() {
-                    Some(x) => x,
-                    None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry didn't have a section.")),
-                };
-
-                last.get_mut().insert(kvp.0.to_string(), kvp.1.to_string());
-
-                continue;
-            }
-            else {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, line didn't hit any requirement"));
-            }
-        }
-        Ok(ret)
-    }
-
     /// Save an INI file after being edited.
     /// Only functions correctly on Windows and Linux.
     /// Ok will contain the size in bytes of the file after writing.
@@ -191,7 +160,7 @@ impl Ini {
     pub fn get(&self, section: &str, key: &str) -> Option<String> {
         if let Some(section_map) = self.config_map.get(section) {
             if let Some(value) = section_map.get(key) {
-                return Some(value.clone());
+                return Some(value.clone().trim_start().to_string());
             }
         }
         None
@@ -228,5 +197,75 @@ impl fmt::Display for Ini {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let ret = self.to_string().unwrap();
         write!(f, "{}", ret)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::{self, File};
+    use std::io::Read;
+    use crate::Ini;
+
+    const INI: &str = "test.ini";
+    const NEW_INI: &str = "test1.ini";
+
+    #[test]
+    fn test_create_struct() {
+        let text = get_text();
+        let str = Ini::from_string(text).unwrap();
+        let file = Ini::new(INI.to_string()).unwrap();
+        assert_eq!(file.config_map, str.config_map);
+    }
+
+    fn get_text() -> String {
+        let mut file = File::open(INI.to_string()).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        if contents.len() == 0 {
+            panic!("No config file found");
+        }
+        contents
+    }
+
+    /// The text may not be the same order, but we can make sure it produced something and manually compare
+    #[test]
+    fn test_to_string() {
+        let file = Ini::new(INI.to_string()).unwrap();
+        let text = get_text();
+        println!("COMPARE BELOW\n");
+        println!("Raw text\n{}\n", text);
+        println!("To string\n{}", file.to_string().unwrap());
+        assert_ne!(file.to_string().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_save() {
+        let mut file = Ini::new(INI.to_string()).unwrap();
+        file.config_file = NEW_INI.to_string();
+        file.save().unwrap();
+        let exists = fs::exists(NEW_INI.to_string()).unwrap();
+        _ = fs::remove_file(NEW_INI.to_string());
+        assert_eq!(exists, true);
+    }
+
+    #[test]
+    fn test_remove_section_get() {
+        let mut ini = Ini::new(INI.to_string()).unwrap();
+        ini.remove_section("General");
+        assert_eq!(ini.get("General", "app_name"), None)
+    }
+
+    #[test]
+    fn test_set_get() {
+        let mut ini = Ini::new(INI.to_string()).unwrap();
+        ini.set("General", "app_name", "app");
+        assert_eq!(ini.get("General", "app_name").unwrap(), "app".to_string());
+    }
+
+    #[test]
+    fn test_remove_get() {
+        let mut ini = Ini::new(INI.to_string()).unwrap();
+        ini.remove("General", "app_name");
+        assert_eq!(ini.get("General", "app_name"), None);
     }
 }
