@@ -1,5 +1,7 @@
 # ini-rs
 
+[![Rust](https://github.com/DawsonThePagan/ini-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/DawsonThePagan/ini-rs/actions/workflows/rust.yml)
+
 A rust crate to read an INI file into a structure. The data can be accessed directly if required.
 
 Testing application can be found [here](https://github.com/DawsonThePagan/Test-ini-rs)
