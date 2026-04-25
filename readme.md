@@ -4,6 +4,13 @@
 
 A rust crate to read an INI file into a structure. The data can be accessed directly if required.
 
+## Recent Changes
+
+Added support for global parameters  
+Input buffered, allowing for larger and faster parsing  
+Changed from b tree to Hashmap, speed up processing. Should have done this in the first place  
+Added new functions to ignore case, useful when interacting with windows INI files
+
 ## Examples
 
 Load an INI file

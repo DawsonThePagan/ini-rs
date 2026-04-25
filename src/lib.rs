@@ -1,19 +1,21 @@
-use std::fs::{OpenOptions};
-use std::io::{self, Write};
-use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write, BufRead, BufReader, Cursor};
+use std::collections::HashMap;
 use std::env::consts::OS;
 use std::fmt;
 use std::path::Path;
-extern crate read_lines_with_blank;
-use read_lines_with_blank::{read_lines_with_blank, read_lines_with_blank_from_str};
 
 /// Load INI files into a structured BTreeMap, then edit them.
 /// Can also create new INI files.
 /// You can access the data directly via config_map, or use the provided functions.
-/// This only works on Windows and Linux
+/// Only tested on Windows and Linux
+
+#[derive(Clone)]
 pub struct Ini {
-    pub config_map: BTreeMap<String, BTreeMap<String, String>>,
+    pub config_map: HashMap<String, HashMap<String, String>>,
+    pub global_params: HashMap<String, String>,
     pub config_file: String,
+    ignore_case: bool,
 }
 
 const CONFIG_SECTION_START: &str = "[";
@@ -29,19 +31,31 @@ impl Ini {
     /// Load in an INI file and return its structure.
     /// If the file doesn't exist, then returns empty structure.
     pub fn new(location: String) -> Result<Ini, io::Error> {
-        let mut ret = Ini{ config_map: BTreeMap::new(), config_file: location.clone() };
-
         if !Path::new(&location).exists() {
-            return Ok(ret);
+            return Ok(Ini { config_map: HashMap::new(), global_params: HashMap::new(), config_file: location, ignore_case: false });
         }
-        
 
-        let lines = match read_lines_with_blank(&location) {
+        let f = File::open(&location)?;
+
+        let mut ret = match Self::build_struct(BufReader::new(f), false) {
             Ok(x) => x,
-            Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Failed to read file"))
+            Err(e) => return Err(e)
         };
 
-        ret = match Self::build_struct(lines) {
+        ret.config_file = location;
+        Ok(ret)
+    }
+
+    /// Load in an INI file and return its structure.
+    /// If the file doesn't exist, then returns empty structure.
+    pub fn new_ignore_case(location: String) -> Result<Ini, io::Error> {
+        if !Path::new(&location).exists() {
+            return Ok(Ini { config_map: HashMap::new(), global_params: HashMap::new(), config_file: location, ignore_case: true });
+        }
+
+        let f = File::open(&location)?;
+
+        let mut ret = match Self::build_struct(BufReader::new(f), true) {
             Ok(x) => x,
             Err(e) => return Err(e)
         };
@@ -52,22 +66,42 @@ impl Ini {
 
     /// Create ini structure from a string. Does not set the config_file so save doesn't work unless set manually.
     pub fn from_string(str: String) -> Result<Ini, io::Error> {
-        let lines = match read_lines_with_blank_from_str(&str) {
+        let ret = match Self::build_struct(Cursor::new(&str.as_bytes()), false) {
             Ok(x) => x,
-            Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Failed to read file"))
+            Err(e) => return Err(e)
         };
+        Ok(ret)
+    }
 
-        Self::build_struct(lines)
+    /// Create ini structure from a string. Does not set the config_file so save doesn't work unless set manually.
+    pub fn from_string_ignore_case(str: String) -> Result<Ini, io::Error> {
+        let ret = match Self::build_struct(Cursor::new(&str.as_bytes()), true) {
+            Ok(x) => x,
+            Err(e) => return Err(e)
+        };
+        Ok(ret)
     }
 
     /// Build the struct given a set of lines
     /// Will need the file location added
-    fn build_struct(lines: Vec<String>) -> Result<Ini, io::Error> {
+    fn build_struct<R: BufRead>(mut input: R, ignore_case: bool) -> Result<Ini, io::Error> {
         let mut in_section = false;
         let mut cur_sec: String = String::from("");
-        let mut ret = Ini{ config_map: BTreeMap::new(), config_file: "".to_string() };
+        let mut ret = Ini{ config_map: HashMap::new(), global_params: HashMap::new(), config_file: "".to_string(), ignore_case };
 
-        for line in lines {
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            match input.read_line(&mut line) {
+                Ok(x) => {
+                    if x == 0 {
+                        break;
+                    }
+                }
+                Err(e) => return Err(e)
+            }
+
             if line.starts_with(CONFIG_COMMENT_HASH) || line.starts_with(CONFIG_COMMENT_SEMI) {
                 continue;
             }
@@ -78,22 +112,37 @@ impl Ini {
             // Section found
             if line.starts_with(CONFIG_SECTION_START) && line.contains(CONFIG_SECTION_END) {
                 cur_sec = line.replace(CONFIG_SECTION_START, "").replace(CONFIG_SECTION_END, "").trim().to_string();
-                ret.config_map.insert(cur_sec.clone(), BTreeMap::new());
+                if ignore_case {
+                    cur_sec = cur_sec.to_lowercase();
+                }
+                ret.config_map.insert(cur_sec.clone(), HashMap::new());
                 in_section = true;
                 continue;
             }
             // KVP found
             else if line.contains(CONFIG_KVP_SPLIT) {
-                if !in_section {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry found before section."));
-                }
+                let key;
+                let value;
 
-                let kvp = match line.split_once(CONFIG_KVP_SPLIT) {
-                    Some(x) => x,
+                match line.split_once(CONFIG_KVP_SPLIT) {
+                    Some(x) => {
+                        if ignore_case {
+                            key = x.0.trim().to_lowercase();
+                        }
+                        else {
+                            key = x.0.trim().to_string();
+                        }
+                        value = x.1.trim().to_string();
+                    },
                     None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Config file was invalid, KVP entry couldn't be split.")),
                 };
 
-                ret.config_map.get_mut(&cur_sec).unwrap().insert(kvp.0.to_string(), kvp.1.to_string());
+                if !in_section {
+                    ret.global_params.insert(key, value);
+                }
+                else {
+                    ret.config_map.get_mut(&cur_sec).unwrap().insert(key, value);
+                }
 
                 continue;
             }
@@ -157,9 +206,28 @@ impl Ini {
     
 
     /// Get a value from the INI file.
+    /// Get a global parameter by setting section as ""
     pub fn get(&self, section: &str, key: &str) -> Option<String> {
-        if let Some(section_map) = self.config_map.get(section) {
-            if let Some(value) = section_map.get(key) {
+        let s ;
+        let k;
+
+        if self.ignore_case {
+            s = section.to_lowercase();
+            k = key.to_lowercase();
+        }
+        else {
+            s = section.to_string();
+            k = key.to_string();
+        }
+
+        if s == "" {
+            if let Some(v) = self.global_params.get(&s) {
+                return Some(v.clone().trim_start().to_string());
+            }
+        }
+
+        if let Some(section_map) = self.config_map.get(&s) {
+            if let Some(value) = section_map.get(&k) {
                 return Some(value.clone().trim_start().to_string());
             }
         }
@@ -171,8 +239,14 @@ impl Ini {
     /// If the key doesn't exist, it will be created.
     /// This will not save the file.
     pub fn set(&mut self, section: &str, key: &str, value: &str) {
-        let section_map = self.config_map.entry(section.to_string()).or_insert(BTreeMap::new());
-        section_map.insert(key.to_string(), value.to_string());
+        if self.ignore_case {
+            let section_map = self.config_map.entry(section.to_lowercase()).or_insert(HashMap::new());
+            section_map.insert(key.to_lowercase(), value.to_string());
+        }
+        else {
+            let section_map = self.config_map.entry(section.to_string()).or_insert(HashMap::new());
+            section_map.insert(key.to_string(), value.to_string());
+        }
     }
 
     /// Remove a key from the INI file.
@@ -180,15 +254,27 @@ impl Ini {
     /// If the key doesn't exist, it will be created.
     /// This will not save the file.
     pub fn remove(&mut self, section: &str, key: &str) {
-        if let Some(section_map) = self.config_map.get_mut(section) {
-            section_map.remove(key);
+        if self.ignore_case {
+            if let Some(section_map) = self.config_map.get_mut(&section.to_lowercase()) {
+                section_map.remove(&key.to_lowercase());
+            }
+        }
+        else {
+            if let Some(section_map) = self.config_map.get_mut(section) {
+                section_map.remove(key);
+            }
         }
     }
 
     /// Remove a section from the INI file.
     /// This will not save the file.
     pub fn remove_section(&mut self, section: &str) {
-        self.config_map.remove(section);
+        if self.ignore_case {
+            self.config_map.remove(&section.to_lowercase());
+        }
+        else {
+            self.config_map.remove(section);
+        }
     }   
 }
 
@@ -207,6 +293,7 @@ mod tests {
     use crate::Ini;
 
     const INI: &str = "test.ini";
+    const INI_CASELESS: &str = "test_caseless.ini";
     const NEW_INI: &str = "test1.ini";
 
     #[test]
@@ -227,7 +314,17 @@ mod tests {
         contents
     }
 
-    /// The text may not be the same order, but we can make sure it produced something and manually compare
+    fn get_text_caseless() -> String {
+        let mut file = File::open(INI_CASELESS.to_string()).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        if contents.len() == 0 {
+            panic!("No config file found");
+        }
+        contents
+    }
+
+    /// We do not save the data ordered, therefore sections may not be in the same order they went in
     #[test]
     fn test_to_string() {
         let file = Ini::new(INI.to_string()).unwrap();
@@ -236,6 +333,17 @@ mod tests {
         println!("Raw text\n{}\n", text);
         println!("To string\n{}", file.to_string().unwrap());
         assert_ne!(file.to_string().unwrap().len(), 0);
+    }
+
+    #[test]
+    /// A file and string input should be the same
+    fn test_caseless() {
+        let text = get_text_caseless();
+
+        let file = Ini::new(INI_CASELESS.to_string()).unwrap();
+        let string = Ini::from_string(text).unwrap();
+
+        assert_eq!(file.config_map, string.config_map);
     }
 
     #[test]
